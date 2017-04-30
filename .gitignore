@@ -1,0 +1,13 @@
+*.DS_STORE
+# elm-package generated files
+elm-stuff/
+*/elm-stuff/
+# elm-repl generated files
+repl-temp-*
+# elm-make generated files
+elm.js
+index.html
+*/index.html
+# node packages
+node_modules/
+*/node_modules/
