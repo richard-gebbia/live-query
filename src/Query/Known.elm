@@ -17,6 +17,8 @@ module Query.Known
         , map8
         , succeed
         , andMap
+        , query
+        , queryResponse
         )
 
 {-|
@@ -30,15 +32,18 @@ module Query.Known
 
 # Fancy Mapping
 @docs succeed, andMap
+
+# Queries
+@docs query, queryResponse
 -}
 
-import Internal.Types as Types exposing (KnownValue(..), QueryResponse)
+import Query.Advanced as Types exposing (Query(..), QueryResponse)
 
 
 {-| TODO
 -}
-type alias KnownValue a =
-    Types.KnownValue a
+type KnownValue a
+    = KnownValue a QueryResponse
 
 
 primitive : (a -> QueryResponse) -> a -> KnownValue a
@@ -245,3 +250,26 @@ succeed x =
 andMap : KnownValue a -> KnownValue (a -> b) -> KnownValue b
 andMap =
     map2 (|>)
+
+
+{-| Query for a `KnownValue`.
+-}
+query : KnownValue a -> Query a
+query (KnownValue x expectedQueryResponse) =
+    Query
+        { queryAST = Types.Known expectedQueryResponse
+        , parser =
+            (\queryResponse ->
+                if queryResponse == expectedQueryResponse || expectedQueryResponse == Types.ResponseIgnoreThis then
+                    Ok x
+                else
+                    Err (Types.ExpectedKnown expectedQueryResponse queryResponse)
+            )
+        }
+
+
+{-| TODO
+-}
+queryResponse : KnownValue a -> QueryResponse
+queryResponse (KnownValue _ response) =
+    response

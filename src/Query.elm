@@ -3,14 +3,6 @@ module Query
         ( Query
         , KnownValue
         , ResponseParseError
-        , Model
-        , Msg
-        , queryInit
-        , SubUpdate
-        , queryUpdate
-        , queryView
-        , querySubscriptions
-        , newQuery
         , program
         , programWithFlags
         , int
@@ -25,8 +17,8 @@ module Query
         , RecordQuery
         , record
         , field
-        , known
         , fromRecordQuery
+        , known
         , map
         , map2
         , map3
@@ -38,29 +30,29 @@ module Query
         , succeed
         , andMap
         , equals
-        , queryResponseToString
-        , toRawQuery
-        , parseModel
-        , parseQuery
-        , SelectResult
-        , SelectError
-        , select
         )
 
-{-|
+{-| Live queries let you represent your client model or your view as a function of your server model.
+You can then set up your front-end to automatically update when the server does without having to
+write a bunch of code to send requests to the server or parse its responses.
+
+# Primary types
 @docs Query, ResponseParseError
+
+# Query programs
+@docs program, programWithFlags
 
 # Primitive Queries
 @docs int, float, bool, string, unit
 
-# Bigger Structures
-@docs pair, oneOf, maybe, list
-
 # Records
-@docs RecordQuery, record, field, known, fromRecordQuery
+@docs RecordQuery, record, field, fromRecordQuery
 
 # Known Values
 @docs KnownValue, known
+
+# Bigger Structures
+@docs pair, oneOf, maybe, list
 
 # Mapping
 @docs map, map2, map3, map4, map5, map6, map7, map8
@@ -70,54 +62,96 @@ module Query
 
 # Comparison
 @docs equals
-
-# Raw Queries
-@docs queryResponseToString, toRawQuery, parseModel, parseQuery
-
-# Selection
-@docs SelectResult, SelectError, select
 -}
 
-import Combine exposing (Parser, (*>), (<*))
-import Combine.Num as Combine
 import Dict exposing (Dict)
-import Internal.Types exposing (..)
 import Html exposing (Html)
 import Result.Extra as Result
+import Query.Advanced exposing (..)
+import Query.Known as Known
 import WebSocket
 
 
 -- Types
 
 
-{-| TODO
+{-| `Query a` can be read as "a live query for `a`". Once you've built a `Query`,
+you can subscribe to it on the server, and, if all goes well, every time that value
+changes on the server, you'll get notified.
+
+For instance, subscribing to a `Query String` implies that the server has an `String`
+on it somewhere that you care about. Every time that `String` changes on the server, your
+`Query String` will get a copy of its new value on the client. This allows you write
+extremely declarative and concise code:
+```
+stringOnServer = Query.string
+
+view = Query.map Html.text stringOnServer
+```
+Also, and probably more importantly, you never had to build a Json decoder or a
+Http request to get it, which can be tricky and error-prone.
 -}
 type alias Query a =
-    Internal.Types.Query a
+    Query.Advanced.Query a
 
 
 type alias QueryResponse =
-    Internal.Types.QueryResponse
+    Query.Advanced.QueryResponse
 
 
-{-| TODO
+{-| A `KnownValue` is, as its name implies, a value that you already know about on
+the client but is still part of the query. A known value is used to *narrow down*
+the query to a more specific piece of data from the server.
+
+For example, let's say your app has a concept of users. A user looks like this:
+```
+type alias User =
+    { userId: Int
+    , name: String
+    , ...
+    }
+```
+
+You can think of at least some part of your server model as being a `List User`.
+On your client, though, you only ever care about one user at a time, so you'd
+rather just fetch data for that user instead of all the users. Let's say you know
+that the user's `userId` is 3. In that case, you can use a `KnownValue` for the
+`userId` like this:
+```
+userData : Query User
+userData =
+    record User
+        |> field "userId" (known (Known.int 3))
+        |> field "name" string
+        |> ...
+        |> fromRecordQuery
+```
 -}
 type alias KnownValue a =
-    Internal.Types.KnownValue a
+    Known.KnownValue a
 
 
+{-| The primary data structure that represents a query.
+You probably won't be dealing with this unless you're trying to
+optimize server-side computations.
+
+If you find yourself needing to look at the innards of a query,
+check out the `Advanced` module, which exposes all the constructors
+of this type.
+-}
 type alias QueryExpression =
-    Internal.Types.QueryExpression
+    Query.Advanced.QueryExpression
 
 
 type alias QueryParseError =
-    Internal.Types.QueryParseError
+    Query.Advanced.QueryParseError
 
 
-{-| TODO
+{-| An error that is generated when an update from the server arrives that
+can't be parsed.
 -}
 type alias ResponseParseError =
-    Internal.Types.ResponseParseError
+    Query.Advanced.ResponseParseError
 
 
 
@@ -230,6 +264,18 @@ newQuery wsurl query =
 -- Program
 
 
+{-| Create a [`Program`][program] that describes how your app works.
+Note that your `init` and `update` functions should produce a triple
+with the `Query model` as the second element. This program will set up
+a websocket connection with a compatible server for live updates.
+Since the `Query` is for your `model`, that `model` will be updated every
+time the server pushes a new update.
+
+Read about [The Elm Architecture][tea] to learn how to use this.
+
+[program]: http://package.elm-lang.org/packages/elm-lang/core/latest/Platform#Program
+[tea]: https://guide.elm-lang.org/architecture/
+-}
 program :
     { webSocketUrl : String
     , init : ( model, Query model, Cmd msg )
@@ -254,6 +300,18 @@ program { webSocketUrl, init, update, subscriptions, view } =
             }
 
 
+{-| Create a [`Program`][program] that describes how your app works.
+Note that your `init` and `update` functions should produce a triple
+with the `Query model` as the second element. This program will set up
+a websocket connection with a compatible server for live updates.
+Since the `Query` is for your `model`, that `model` will be updated every
+time the server pushes a new update.
+
+Read about [The Elm Architecture][tea] to learn how to use this.
+
+[program]: http://package.elm-lang.org/packages/elm-lang/core/latest/Platform#Program
+[tea]: https://guide.elm-lang.org/architecture/
+-}
 programWithFlags :
     { webSocketUrl : String
     , init : flags -> ( model, Query model, Cmd msg )
@@ -289,127 +347,166 @@ expectedKnown expected actual =
 -- Primitive Queries
 
 
-{-| TODO
+{-| Query for an `Int` in the server's data model. When that value changes
+on the server, you'll be notified on the client.
 -}
 int : Query Int
 int =
-    { queryAST = QueryInt
-    , parser =
-        (\queryResponse ->
-            case queryResponse of
-                ResponseInt x ->
-                    Ok x
+    Query
+        { queryAST = QueryInt
+        , parser =
+            (\queryResponse ->
+                case queryResponse of
+                    ResponseInt x ->
+                        Ok x
 
-                _ ->
-                    wrongType QueryInt queryResponse
-        )
-    }
+                    _ ->
+                        wrongType QueryInt queryResponse
+            )
+        }
 
 
-{-| TODO
+{-| Query for a `Float` in the server's data model. When that value changes
+on the server, you'll be notified on the client.
 -}
 float : Query Float
 float =
-    { queryAST = QueryFloat
-    , parser =
-        (\queryResponse ->
-            case queryResponse of
-                ResponseFloat x ->
-                    Ok x
+    Query
+        { queryAST = QueryFloat
+        , parser =
+            (\queryResponse ->
+                case queryResponse of
+                    ResponseFloat x ->
+                        Ok x
 
-                _ ->
-                    wrongType QueryFloat queryResponse
-        )
-    }
+                    _ ->
+                        wrongType QueryFloat queryResponse
+            )
+        }
 
 
-{-| TODO
+{-| Query for a `Bool` in the server's data model. When that value changes
+on the server, you'll be notified on the client.
 -}
 bool : Query Bool
 bool =
-    { queryAST = QueryBool
-    , parser =
-        (\queryResponse ->
-            case queryResponse of
-                ResponseBool x ->
-                    Ok x
+    Query
+        { queryAST = QueryBool
+        , parser =
+            (\queryResponse ->
+                case queryResponse of
+                    ResponseBool x ->
+                        Ok x
 
-                _ ->
-                    wrongType QueryBool queryResponse
-        )
-    }
+                    _ ->
+                        wrongType QueryBool queryResponse
+            )
+        }
 
 
-{-| TODO
+{-| Query for a `String` in the server's data model. When that value changes
+on the server, you'll be notified on the client.
 -}
 string : Query String
 string =
-    { queryAST = QueryString
-    , parser =
-        (\queryResponse ->
-            case queryResponse of
-                ResponseString x ->
-                    Ok x
+    Query
+        { queryAST = QueryString
+        , parser =
+            (\queryResponse ->
+                case queryResponse of
+                    ResponseString x ->
+                        Ok x
 
-                _ ->
-                    wrongType QueryString queryResponse
-        )
-    }
+                    _ ->
+                        wrongType QueryString queryResponse
+            )
+        }
 
 
-{-| TODO
+{-| Query for a `()` in the server's data model. That value will never
+change, so you'll likely be using this in a similar fashion to a regular
+`()` -- ignoring values you don't care about.
 -}
 unit : Query ()
 unit =
-    { queryAST = QueryUnit
-    , parser =
-        (\queryResponse ->
-            case queryResponse of
-                ResponseUnit ->
-                    Ok ()
+    Query
+        { queryAST = QueryUnit
+        , parser =
+            (\queryResponse ->
+                case queryResponse of
+                    ResponseUnit ->
+                        Ok ()
 
-                _ ->
-                    wrongType QueryUnit queryResponse
-        )
-    }
+                    _ ->
+                        wrongType QueryUnit queryResponse
+            )
+        }
 
 
 
 -- Bigger Structures
 
 
-{-| TODO
+{-| Query for a pair of values in the server's data model.
+
+```
+myPairQuery : Query (Int, String)
+myPairQuery =
+    pair int string
+```
 -}
 pair : Query a -> Query b -> Query ( a, b )
 pair query1 query2 =
     map2 (,) query1 query2
 
 
-{-| TODO
+{-| Try a bunch of different queries in order.
+```
+trueOrFalseQuery =
+    oneOf
+        [ known (Known.string "True")
+        , known (Known.string "False")
+        ]
+```
 -}
 oneOf : List (Query a) -> Query a
 oneOf queries =
     let
         expected =
-            QuerySum (List.map .queryAST queries)
+            QuerySum (List.map (\(Query { queryAST, parser }) -> queryAST) queries)
 
-        findParsedResult queryResponse currentQuery previousResult =
+        findParsedResult queryResponse (Query { queryAST, parser }) previousResult =
             case previousResult of
                 Ok _ ->
                     previousResult
 
                 Err _ ->
-                    currentQuery.parser queryResponse
+                    parser queryResponse
     in
-        { queryAST = expected
-        , parser =
-            (\queryResponse ->
-                List.foldl (findParsedResult queryResponse) (Err BaseCaseForOneOf) queries
-            )
-        }
+        Query
+            { queryAST = expected
+            , parser =
+                (\queryResponse ->
+                    List.foldl (findParsedResult queryResponse) (Err BaseCaseForOneOf) queries
+                )
+            }
 
 
-{-| TODO
+{-| Query for a `Maybe` value on the server. In the `Just` case, it
+is expected for the value to simply exist, and in the `Nothing` case the
+value is expected to come back as `()`.
+
+```
+maybeIntQuery : Query (Maybe Int)
+maybeIntQuery =
+    maybe int
+
+-- Server sends back: 3
+-- Query will have value: Just 3
+
+-- Server sends back: ()
+-- Query will have value: Nothing
+```
 -}
 maybe : Query a -> Query (Maybe a)
 maybe query =
@@ -423,13 +520,18 @@ maybe query =
         oneOf [ justQuery, nothingQuery ]
 
 
-{-| TODO
+{-| Query for a list of values on the server.
+```
+listOfInts : Query (List Int)
+listOfInts =
+    list int
+```
 -}
 list : Query a -> Query (List a)
-list query =
+list (Query { queryAST, parser }) =
     let
         expected =
-            QueryList query.queryAST
+            QueryList queryAST
 
         buildResultList ( index, listItemParseResult ) resultList =
             case resultList of
@@ -444,23 +546,30 @@ list query =
                 _ ->
                     resultList
     in
-        { queryAST = expected
-        , parser =
-            (\queryResponse ->
-                case queryResponse of
-                    ResponseList responseList ->
-                        List.map query.parser responseList
-                            |> List.indexedMap (,)
-                            |> List.foldr buildResultList (Ok [])
+        Query
+            { queryAST = expected
+            , parser =
+                (\queryResponse ->
+                    case queryResponse of
+                        ResponseList responseList ->
+                            List.map parser responseList
+                                |> List.indexedMap (,)
+                                |> List.foldr buildResultList (Ok [])
 
-                    _ ->
-                        wrongType expected queryResponse
-            )
-        }
+                        _ ->
+                            wrongType expected queryResponse
+                )
+            }
 
 
+{-| Query for a map of keys to values on the server.
+
+namesToAges : Query (Dict String Int)
+namesToAges =
+    dict string int
+-}
 dict : Query comparable -> Query value -> Query (Dict comparable value)
-dict keyQuery valueQuery =
+dict (Query keyQuery) (Query valueQuery) =
     let
         expected =
             QueryDict keyQuery.queryAST valueQuery.queryAST
@@ -490,138 +599,225 @@ dict keyQuery valueQuery =
                     _ ->
                         result
     in
-        { queryAST = expected
-        , parser =
-            (\queryResponse ->
-                case queryResponse of
-                    ResponseDict responseKeyValuePairs ->
-                        List.foldl buildResultDict (Ok Dict.empty) responseKeyValuePairs
+        Query
+            { queryAST = expected
+            , parser =
+                (\queryResponse ->
+                    case queryResponse of
+                        ResponseDict responseKeyValuePairs ->
+                            List.foldl buildResultDict (Ok Dict.empty) responseKeyValuePairs
 
-                    _ ->
-                        wrongType expected queryResponse
-            )
-        }
-
-
-
--- Records
-
-
-{-| TODO
--}
-type alias RecordQuery a =
-    { fields : Dict String QueryExpression
-    , parser : QueryResponse -> Result ResponseParseError a
-    }
-
-
-{-| TODO
--}
-record : a -> RecordQuery a
-record ctor =
-    { fields = Dict.empty
-    , parser = (\_ -> Ok ctor)
-    }
-
-
-{-| TODO
--}
-field : String -> Query a -> RecordQuery (a -> b) -> RecordQuery b
-field name query previous =
-    { fields = Dict.insert name query.queryAST previous.fields
-    , parser =
-        (\queryResponse ->
-            let
-                previousFn =
-                    previous.parser queryResponse
-            in
-                case queryResponse of
-                    ResponseRecord record ->
-                        Dict.get name record
-                            |> Maybe.map query.parser
-                            |> Maybe.map (flip Result.andMap previousFn)
-                            |> Maybe.map (Result.mapError (ErrorAtKey (ResponseString name)))
-                            |> Maybe.withDefault (Err (KeyNotFound name queryResponse))
-
-                    _ ->
-                        wrongType (QueryRecord (Dict.singleton name query.queryAST)) queryResponse
-        )
-    }
-
-
-{-| TODO
--}
-fromRecordQuery : RecordQuery a -> Query a
-fromRecordQuery recordQuery =
-    { queryAST = QueryRecord recordQuery.fields
-    , parser = recordQuery.parser
-    }
+                        _ ->
+                            wrongType expected queryResponse
+                )
+            }
 
 
 
 -- Known Values
 
 
-{-| TODO
+{-| Query for a `KnownValue`.
 -}
-known : KnownValue a -> Query a
-known (KnownValue x expectedQueryResponse) =
-    { queryAST = Known expectedQueryResponse
-    , parser =
-        (\queryResponse ->
-            if queryResponse == expectedQueryResponse || expectedQueryResponse == ResponseIgnoreThis then
-                Ok x
-            else
-                expectedKnown expectedQueryResponse queryResponse
-        )
+known : Known.KnownValue a -> Query a
+known =
+    Known.query
+
+
+
+-- Records
+
+
+{-| A `RecordQuery` is, as its name implies, a live query for a record value
+on the server. It is unique in that the set of fields queried is not required
+to exactly match the same object on the server. It can be a subset of the fields,
+in which case, only those fields will be returned from the server.
+
+For example:
+```
+type alias ServerDataModel =
+    { tweet: String
+    , likes: Int
+    , retweets: Int
+    , author: String
     }
+
+-- let's not show all the tweet information
+type alias ClientDataModel =
+    { tweet: String
+    , author: String
+    }
+
+tweetAndAuthorQuery : RecordQuery ClientDataModel
+tweetAndAuthorQuery =
+    record ClientDataModel
+        |> field "tweet" string
+        |> field "author" string
+```
+-}
+type RecordQuery a
+    = RecordQuery
+        { fields : Dict String QueryExpression
+        , parser : QueryResponse -> Result ResponseParseError a
+        }
+
+
+{-| Creates a new `RecordQuery` given a constructor for a record type.
+```
+emptyRecordQuery : RecordQuery {}
+emptyRecordQuery =
+    record {}
+```
+-}
+record : a -> RecordQuery a
+record ctor =
+    RecordQuery
+        { fields = Dict.empty
+        , parser = (\_ -> Ok ctor)
+        }
+
+
+{-| Adds a field to the supplied `RecordQuery`. The type signature
+is designed similarly to `andMap`, so that you can make type-safe
+record queries (you still need to get the field name right, though).
+
+```
+type alias User =
+    { name: String
+    , points: Int
+    }
+
+userQuery : RecordQuery User
+userQuery =
+    record User
+        |> field "name" string
+        |> field "points" int
+
+-- this won't compile, since "points"
+-- isn't a String field
+userQuery_ : RecordQuery User
+userQuery_ =
+    record User
+        |> field "name" string
+        |> field "points" string
+```
+-}
+field : String -> Query a -> RecordQuery (a -> b) -> RecordQuery b
+field name (Query current) (RecordQuery previous) =
+    RecordQuery
+        { fields = Dict.insert name current.queryAST previous.fields
+        , parser =
+            (\queryResponse ->
+                let
+                    previousFn =
+                        previous.parser queryResponse
+                in
+                    case queryResponse of
+                        ResponseRecord record ->
+                            Dict.get name record
+                                |> Maybe.map current.parser
+                                |> Maybe.map (flip Result.andMap previousFn)
+                                |> Maybe.map (Result.mapError (ErrorAtKey (ResponseString name)))
+                                |> Maybe.withDefault (Err (KeyNotFound name queryResponse))
+
+                        _ ->
+                            wrongType (QueryRecord (Dict.singleton name current.queryAST)) queryResponse
+            )
+        }
+
+
+{-| Converts a `RecordQuery` to a regular `Query`.
+-}
+fromRecordQuery : RecordQuery a -> Query a
+fromRecordQuery (RecordQuery { fields, parser }) =
+    Query
+        { queryAST = QueryRecord fields
+        , parser = parser
+        }
 
 
 
 -- Mapping
 
 
-{-| TODO
+{-| Transform a query. This is useful primarily for "casting" primitive values
+into user-defined types.
+
+```
+type Age = Age Int
+
+ageQuery : Query Age
+ageQuery =
+    map Age int
+```
+
+It is especially useful with `oneOf` to query for union types on the server.
+
+```
+resultQuery : Query (Result String Int)
+resultQuery =
+    oneOf
+        [ map Ok int
+        , map Err string
+        ]
+```
 -}
 map : (a -> b) -> Query a -> Query b
-map f query =
-    { query | parser = query.parser >> Result.map f }
+map f (Query query) =
+    Query { query | parser = query.parser >> Result.map f }
 
 
-{-| TODO
+{-| Query for two things at once and combine the result. We can use this
+to query for objects with multiple fields.
+```
+type Point2D = Point2D Float Float
+
+pointQuery : Query Point2D
+pointQuery =
+    map2 Point2D float float
+```
 -}
 map2 :
     (a -> b -> c)
     -> Query a
     -> Query b
     -> Query c
-map2 f query1 query2 =
+map2 f (Query query1) (Query query2) =
     let
         expected =
             QueryProduct query1.queryAST query2.queryAST
     in
-        { queryAST = expected
-        , parser =
-            (\queryResponse ->
-                case ( query1.queryAST, query2.queryAST ) of
-                    ( QueryIgnoreThis, _ ) ->
-                        Result.map2 f (query1.parser ResponseUnit) (query2.parser queryResponse)
+        Query
+            { queryAST = expected
+            , parser =
+                (\queryResponse ->
+                    case ( query1.queryAST, query2.queryAST ) of
+                        ( QueryIgnoreThis, _ ) ->
+                            Result.map2 f (query1.parser ResponseUnit) (query2.parser queryResponse)
 
-                    ( _, QueryIgnoreThis ) ->
-                        Result.map2 f (query1.parser queryResponse) (query2.parser ResponseUnit)
+                        ( _, QueryIgnoreThis ) ->
+                            Result.map2 f (query1.parser queryResponse) (query2.parser ResponseUnit)
 
-                    _ ->
-                        case queryResponse of
-                            ResponseProduct subResponse1 subResponse2 ->
-                                Result.map2 f (query1.parser subResponse1) (query2.parser subResponse2)
+                        _ ->
+                            case queryResponse of
+                                ResponseProduct subResponse1 subResponse2 ->
+                                    Result.map2 f (query1.parser subResponse1) (query2.parser subResponse2)
 
-                            _ ->
-                                wrongType expected queryResponse
-            )
-        }
+                                _ ->
+                                    wrongType expected queryResponse
+                )
+            }
 
 
-{-| TODO
+{-| Query for three things at once and combine the result. We can use this
+to query for objects with multiple fields.
+```
+type Point3D = Point3D Float Float Float
+
+pointQuery : Query Point3D
+pointQuery =
+    map3 Point3D float float float
+```
 -}
 map3 :
     (a -> b -> c -> d)
@@ -636,8 +832,7 @@ map3 f query1 query2 query3 =
         |> andMap query3
 
 
-{-| TODO
--}
+{-| -}
 map4 :
     (a -> b -> c -> d -> e)
     -> Query a
@@ -653,8 +848,7 @@ map4 f query1 query2 query3 query4 =
         |> andMap query4
 
 
-{-| TODO
--}
+{-| -}
 map5 :
     (a -> b -> c -> d -> e -> f)
     -> Query a
@@ -672,8 +866,7 @@ map5 f query1 query2 query3 query4 query5 =
         |> andMap query5
 
 
-{-| TODO
--}
+{-| -}
 map6 :
     (a -> b -> c -> d -> e -> f -> g)
     -> Query a
@@ -693,8 +886,7 @@ map6 f query1 query2 query3 query4 query5 query6 =
         |> andMap query6
 
 
-{-| TODO
--}
+{-| -}
 map7 :
     (a -> b -> c -> d -> e -> f -> g -> h)
     -> Query a
@@ -716,8 +908,7 @@ map7 f query1 query2 query3 query4 query5 query6 query7 =
         |> andMap query7
 
 
-{-| TODO
--}
+{-| -}
 map8 :
     (a -> b -> c -> d -> e -> f -> g -> h -> i)
     -> Query a
@@ -745,16 +936,49 @@ map8 f query1 query2 query3 query4 query5 query6 query7 query8 =
 -- Fancy Queries
 
 
-{-| TODO
+{-| Ignore the server response and always return a particular value.
+This is different from a `KnownValue` because a `KnownValue` is actually
+sent to the server and used to filter results.
+
+This is useful when combined with `oneOf` to create a "default case" for
+when all other queries fail.
+
+```
+ageQuery : Query Int
+ageQuery =
+    oneOf
+        [ int
+        , succeed 42
+        ]
+```
 -}
 succeed : a -> Query a
 succeed x =
-    { queryAST = QueryIgnoreThis
-    , parser = (\_ -> Ok x)
-    }
+    Query
+        { queryAST = QueryIgnoreThis
+        , parser = (\_ -> Ok x)
+        }
 
 
-{-| TODO
+{-| Create a query that depends on the result of another. Like `map2`, `map3`,
+and the other map functions, this can be used to query for larger objects.
+
+For instance, this query:
+```
+type Point3D = Point3D Float Float Float
+
+pointQuery =
+    map3 Point3D float float float
+```
+
+is equivalent to this one:
+```
+pointQuery =
+    succeed Point3D
+        |> andMap float
+        |> andMap float
+        |> andMap float
+```
 -}
 andMap : Query a -> Query (a -> b) -> Query b
 andMap =
@@ -765,466 +989,13 @@ andMap =
 -- Comparison
 
 
-{-| TODO
+{-| Given two queries, tells whether or not they
+query for the same value.
+```
+equals int int == True
+equals string float == False
+```
 -}
 equals : Query a -> Query a -> Bool
-equals query1 query2 =
+equals (Query query1) (Query query2) =
     query1.queryAST == query2.queryAST
-
-
-
--- Raw Queries
-
-
-keyValuePairString : ( String, String ) -> String
-keyValuePairString ( k, v ) =
-    k ++ ":" ++ v
-
-
-{-| TODO
--}
-queryResponseToString : QueryResponse -> String
-queryResponseToString queryResponse =
-    case queryResponse of
-        ResponseInt x ->
-            toString x
-
-        ResponseFloat x ->
-            toString x
-
-        ResponseBool x ->
-            toString x
-
-        ResponseString x ->
-            toString x
-
-        ResponseUnit ->
-            "Unit"
-
-        ResponseList list ->
-            List.map queryResponseToString list
-                |> List.intersperse ","
-                |> List.foldl (++) ""
-
-        ResponseDict entries ->
-            let
-                onPair : (a -> b) -> ( a, a ) -> ( b, b )
-                onPair f ( x, y ) =
-                    ( f x, f y )
-            in
-                "{"
-                    ++ (List.map (onPair queryResponseToString) entries
-                            |> List.map keyValuePairString
-                            |> List.intersperse ","
-                            |> List.foldl (++) ""
-                       )
-                    ++ "}"
-
-        ResponseRecord record ->
-            "{"
-                ++ (Dict.toList record
-                        |> List.map (\( name, value ) -> ( "\"" ++ name ++ "\"", queryResponseToString value ))
-                        |> List.map keyValuePairString
-                        |> List.intersperse ";"
-                        |> List.foldl (++) ""
-                   )
-                ++ "}"
-
-        ResponseProduct subResponse1 subResponse2 ->
-            if subResponse1 == ResponseIgnoreThis then
-                queryResponseToString subResponse2
-            else if subResponse2 == ResponseIgnoreThis then
-                queryResponseToString subResponse1
-            else
-                "(" ++ queryResponseToString subResponse1 ++ "," ++ queryResponseToString subResponse2 ++ ")"
-
-        ResponseIgnoreThis ->
-            ""
-
-
-{-| TODO
--}
-toRawQuery : Query a -> String
-toRawQuery { queryAST, parser } =
-    toRawQueryFromAST queryAST
-
-
-toRawQueryFromAST : QueryExpression -> String
-toRawQueryFromAST queryAST =
-    case queryAST of
-        QueryInt ->
-            "Int"
-
-        QueryFloat ->
-            "Float"
-
-        QueryBool ->
-            "Bool"
-
-        QueryString ->
-            "String"
-
-        QueryUnit ->
-            "Unit"
-
-        Known queryResponse ->
-            queryResponseToString queryResponse
-
-        QuerySum candidates ->
-            List.map toRawQueryFromAST candidates
-                |> List.intersperse "|"
-                |> List.foldl (++) "|"
-
-        QueryProduct subQuery1 subQuery2 ->
-            if subQuery1 == QueryIgnoreThis then
-                toRawQueryFromAST subQuery2
-            else if subQuery2 == QueryIgnoreThis then
-                toRawQueryFromAST subQuery1
-            else
-                "(" ++ toRawQueryFromAST subQuery1 ++ "," ++ toRawQueryFromAST subQuery2 ++ ")"
-
-        QueryList listQuery ->
-            "[" ++ toRawQueryFromAST listQuery ++ "]"
-
-        QueryDict keyQuery valueQuery ->
-            "{" ++ toRawQueryFromAST keyQuery ++ ":" ++ toRawQueryFromAST valueQuery ++ "}"
-
-        QueryRecord record ->
-            "{"
-                ++ (Dict.toList record
-                        |> List.map (\( name, value ) -> ( "\"" ++ name ++ "\"", toRawQueryFromAST value ))
-                        |> List.map keyValuePairString
-                        |> List.intersperse ";"
-                        |> List.foldl (++) ""
-                   )
-                ++ "}"
-
-        QueryIgnoreThis ->
-            ""
-
-
-
--- TODO: errors
-
-
-skipThen : Parser s b -> Parser s a -> Parser s a
-skipThen parserToSkip nextParser =
-    (Combine.skip parserToSkip
-        |> Combine.andThen (\_ -> nextParser)
-    )
-
-
-rawStringParser : Parser s String
-rawStringParser =
-    -- thanks Bogdanp
-    (Combine.string "\"" *> Combine.regex "(\\\\\"|[^\"\n])*" <* Combine.string "\"")
-
-
-{-| TODO
--}
-responseParser : Parser () QueryResponse
-responseParser =
-    let
-        this =
-            Combine.lazy (\_ -> responseParser)
-
-        intParser =
-            Combine.int |> Combine.map ResponseInt
-
-        floatParser =
-            Combine.float |> Combine.map ResponseFloat
-
-        boolParser =
-            Combine.or
-                (Combine.string "True" |> Combine.map (\_ -> ResponseBool True))
-                (Combine.string "False" |> Combine.map (\_ -> ResponseBool False))
-
-        stringParser =
-            rawStringParser
-                |> Combine.map ResponseString
-
-        unitParser =
-            Combine.string "Unit" |> Combine.map (\_ -> ResponseUnit)
-
-        listParser =
-            Combine.brackets (Combine.sepBy (Combine.string ",") this)
-                |> Combine.map ResponseList
-
-        dictParser =
-            let
-                keyValueParser =
-                    this
-                        |> Combine.map (,)
-                        |> Combine.andMap (skipThen (Combine.string ":") this)
-            in
-                Combine.braces (Combine.sepBy (Combine.string ",") keyValueParser)
-                    |> Combine.map ResponseDict
-
-        recordParser =
-            let
-                keyValueParser =
-                    rawStringParser
-                        |> Combine.map (,)
-                        |> Combine.andMap (skipThen (Combine.string ":") this)
-            in
-                Combine.braces (Combine.sepBy (Combine.string ";") keyValueParser)
-                    |> Combine.map Dict.fromList
-                    |> Combine.map ResponseRecord
-
-        productParser =
-            Combine.parens
-                (this
-                    |> Combine.map ResponseProduct
-                    |> Combine.andMap (skipThen (Combine.string ",") this)
-                )
-    in
-        Combine.choice
-            [ floatParser
-            , intParser
-            , boolParser
-            , stringParser
-            , unitParser
-            , listParser
-            , dictParser
-            , recordParser
-            , productParser
-            ]
-
-
-{-| TODO
--}
-astParser : Parser () QueryExpression
-astParser =
-    let
-        this =
-            Combine.lazy (\_ -> astParser)
-
-        primitiveParser =
-            Combine.choice
-                [ Combine.string "Int" |> Combine.map (\_ -> QueryInt)
-                , Combine.string "Float" |> Combine.map (\_ -> QueryFloat)
-                , Combine.string "Bool" |> Combine.map (\_ -> QueryBool)
-                , Combine.string "String" |> Combine.map (\_ -> QueryString)
-                , Combine.string "Unit" |> Combine.map (\_ -> QueryUnit)
-                ]
-
-        productParser =
-            Combine.parens
-                (this
-                    |> Combine.map QueryProduct
-                    |> Combine.andMap (skipThen (Combine.string ",") this)
-                )
-
-        sumParser =
-            Combine.many1 (skipThen (Combine.string "|") this)
-                |> Combine.map QuerySum
-
-        listParser =
-            Combine.brackets this
-                |> Combine.map QueryList
-
-        dictParser =
-            Combine.braces
-                (this
-                    |> Combine.map QueryDict
-                    |> Combine.andMap (skipThen (Combine.string ":") this)
-                )
-
-        recordParser =
-            let
-                keyValueParser =
-                    rawStringParser
-                        |> Combine.map (,)
-                        |> Combine.andMap (skipThen (Combine.string ":") this)
-            in
-                Combine.braces (Combine.sepBy (Combine.string ";") keyValueParser)
-                    |> Combine.map Dict.fromList
-                    |> Combine.map QueryRecord
-
-        knownValueParser =
-            responseParser
-                |> Combine.map Known
-    in
-        Combine.choice
-            [ primitiveParser
-            , productParser
-            , sumParser
-            , listParser
-            , dictParser
-            , recordParser
-            , knownValueParser
-            ]
-
-
-{-| TODO
--}
-parseModel : Query model -> String -> Result ResponseParseError model
-parseModel query toParse =
-    Combine.parse responseParser toParse
-        |> Result.mapError (\( _, _, errorMessages ) -> ResponseFromStringError errorMessages)
-        |> Result.andThen (\( _, _, response ) -> query.parser response)
-
-
-{-| TODO
--}
-parseQuery : String -> Result QueryParseError QueryExpression
-parseQuery toParse =
-    Combine.parse astParser toParse
-        |> Result.mapError (\( _, _, errorMessages ) -> QueryFromStringError errorMessages)
-        |> Result.map (\( _, _, queryAST ) -> queryAST)
-
-
-
--- Selection
-
-
-{-| TODO
--}
-type alias SelectError =
-    Internal.Types.SelectError
-
-
-{-| TODO
--}
-type alias SelectResult =
-    Result SelectError QueryResponse
-
-
-type alias RecordSelectResult =
-    Result SelectError (Dict String QueryResponse)
-
-
-{-| TODO
--}
-select : QueryExpression -> QueryResponse -> SelectResult
-select query response =
-    case ( query, response ) of
-        ( QueryInt, ResponseInt x ) ->
-            Ok (ResponseInt x)
-
-        ( QueryFloat, ResponseFloat x ) ->
-            Ok (ResponseFloat x)
-
-        ( QueryBool, ResponseBool x ) ->
-            Ok (ResponseBool x)
-
-        ( QueryString, ResponseString x ) ->
-            Ok (ResponseString x)
-
-        ( QueryUnit, ResponseUnit ) ->
-            Ok ResponseUnit
-
-        ( Known knownResponse, response ) ->
-            if response == knownResponse then
-                Ok response
-            else
-                Err UnmatchedKnown
-
-        ( QuerySum possibleMatches, response ) ->
-            let
-                findAMatch possibleMatch result =
-                    case result of
-                        Ok matchedResponse ->
-                            Ok matchedResponse
-
-                        _ ->
-                            select possibleMatch response
-            in
-                List.foldr findAMatch (Err MatchFailure) possibleMatches
-
-        ( QueryList listTypeQuery, ResponseList list ) ->
-            let
-                hasError ( index, result ) =
-                    case result of
-                        Ok _ ->
-                            Nothing
-
-                        Err msg ->
-                            Just ( index, msg )
-
-                aggregateErrors errors =
-                    case errors of
-                        [] ->
-                            Ok (ResponseList list)
-
-                        _ ->
-                            Err (AggregateSelectErrors errors)
-            in
-                List.map (select listTypeQuery) list
-                    |> List.indexedMap (,)
-                    |> List.filterMap hasError
-                    |> List.map (\( index, error ) -> SelectErrorAtIndex index error)
-                    |> aggregateErrors
-
-        ( QueryProduct subQuery1 subQuery2, ResponseProduct response1 response2 ) ->
-            let
-                result1 =
-                    select subQuery1 response1
-
-                result2 =
-                    select subQuery2 response2
-            in
-                case ( result1, result2 ) of
-                    ( Ok response1, Ok response2 ) ->
-                        Ok (ResponseProduct response1 response2)
-
-                    ( Err msg, Ok _ ) ->
-                        Err (SelectProductLeftError msg)
-
-                    ( Ok _, Err msg ) ->
-                        Err (SelectProductRightError msg)
-
-                    ( Err msg1, Err msg2 ) ->
-                        Err (AggregateSelectErrors [ SelectProductLeftError msg1, SelectProductRightError msg2 ])
-
-        ( QueryRecord queryFields, ResponseRecord responseFields ) ->
-            selectFromRecord queryFields responseFields
-                |> Result.map ResponseRecord
-
-        _ ->
-            Err MatchFailure
-
-
-selectFromRecord : Dict String QueryExpression -> Dict String QueryResponse -> RecordSelectResult
-selectFromRecord queryFields responseFields =
-    let
-        makeError : RecordSelectResult -> SelectError -> RecordSelectResult
-        makeError currentResult currentError =
-            case currentResult of
-                Err (AggregateSelectErrors errors) ->
-                    Err (AggregateSelectErrors (currentError :: errors))
-
-                Err msg ->
-                    Err (AggregateSelectErrors [ currentError, msg ])
-
-                _ ->
-                    Err currentError
-
-        inQueryButNotInResponse : String -> QueryExpression -> RecordSelectResult -> RecordSelectResult
-        inQueryButNotInResponse fieldName query currentResult =
-            makeError currentResult (UnknownField fieldName)
-
-        inBothQueryAndResponse : String -> QueryExpression -> QueryResponse -> RecordSelectResult -> RecordSelectResult
-        inBothQueryAndResponse fieldName query response currentResult =
-            let
-                selectFieldResult =
-                    select query response
-            in
-                case selectFieldResult of
-                    Ok response ->
-                        Result.map (Dict.insert fieldName response) currentResult
-
-                    Err msg ->
-                        makeError currentResult msg
-
-        inResponseButNotInQuery : String -> QueryResponse -> RecordSelectResult -> RecordSelectResult
-        inResponseButNotInQuery _ _ currentResult =
-            currentResult
-    in
-        Dict.merge
-            inQueryButNotInResponse
-            inBothQueryAndResponse
-            inResponseButNotInQuery
-            queryFields
-            responseFields
-            (Ok Dict.empty)

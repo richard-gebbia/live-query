@@ -1,9 +1,9 @@
 module Query.Server exposing (ClientId, Model, init, Msg, update, newState, subscriptions, StateUpdate)
 
 import IntDict exposing (IntDict)
-import Internal.Types exposing (QueryExpression, QueryResponse, KnownValue(..), SelectError, QueryParseError)
 import Json.Decode as Json
-import Query exposing (SelectResult)
+import Query.Advanced exposing (QueryExpression, QueryResponse, SelectError, SelectResult, QueryParseError)
+import Query.Known as Known exposing (KnownValue)
 
 
 -- Model
@@ -73,8 +73,8 @@ type ServerEvent
 
 
 newState : (StateUpdate -> Cmd Msg) -> KnownValue a -> Model -> ( Model, Maybe ServerEvent, Cmd Msg )
-newState stateUpdates (KnownValue _ queryResponse) model =
-    update stateUpdates (StateUpdate queryResponse) model
+newState stateUpdates known model =
+    update stateUpdates (StateUpdate (Known.queryResponse known)) model
 
 
 update : (StateUpdate -> Cmd Msg) -> Msg -> Model -> ( Model, Maybe ServerEvent, Cmd Msg )
@@ -83,7 +83,7 @@ update stateUpdates msg model =
         ClientMessage { clientId, message } ->
             let
                 parseResult =
-                    Query.parseQuery message
+                    Query.Advanced.parseQuery message
 
                 oldQuery =
                     IntDict.get clientId model.clientQueries
@@ -121,7 +121,7 @@ update stateUpdates msg model =
                         Ok response ->
                             let
                                 rawResponse =
-                                    Query.queryResponseToString response
+                                    Query.Advanced.queryResponseToString response
                             in
                                 List.foldl
                                     (\clientMessage ( stateUpdate, hasAdded ) ->
@@ -152,7 +152,7 @@ update stateUpdates msg model =
                             { state | errors = ( clientId, msg ) :: state.errors }
 
                 clientUpdates =
-                    IntDict.map (\_ query -> Query.select query newState) model.clientQueries
+                    IntDict.map (\_ query -> Query.Advanced.select query newState) model.clientQueries
                         |> IntDict.foldl successfulSelectResults { stateUpdate = [], errors = [] }
 
                 cmd =

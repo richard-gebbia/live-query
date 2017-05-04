@@ -8,6 +8,8 @@ repl-temp-*
 elm.js
 index.html
 */index.html
+documentation.json
+*/documentation.json
 # node packages
 node_modules/
 */node_modules/
