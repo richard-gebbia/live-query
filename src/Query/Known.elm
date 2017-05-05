@@ -19,10 +19,11 @@ module Query.Known
         , andMap
         , query
         , queryResponse
+        , value
         )
 
 {-|
-@docs KnownValue
+@docs KnownValue, value
 
 # Primitive Values
 @docs int, float, bool, string, unit, list
@@ -40,7 +41,30 @@ module Query.Known
 import Query.Advanced as Types exposing (Query(..), QueryResponse)
 
 
-{-| TODO
+{-| A `KnownValue` is, as its name implies, a value that you already know about on
+the client but is still part of the query. A known value is used to *narrow down*
+the query to a more specific piece of data from the server.
+
+As an example, let's say you're building a program that solves algebraic
+equations. The user inputs the equation they want solved on the client and the
+server simulates the graph of the equation by plugging in points. The server
+model, then, looks like this:
+
+```
+type alias ServerModel = List (Float, Float)
+```
+
+On the client, you only want to display *solutions* to that equation
+(that is, points on the curve where x is 0). You can create that
+query like so:
+
+```
+solutionsQuery : Query (Float, Float)
+solutionsQuery =
+    pair
+        (known (Known.float 0.0))
+        float
+```
 -}
 type KnownValue a
     = KnownValue a QueryResponse
@@ -51,42 +75,49 @@ primitive queryResponseConstructor x =
     KnownValue x (queryResponseConstructor x)
 
 
-{-| TODO
+{-| Narrow down a query by indicating that you only want data where a piece
+has a particular integer value.
 -}
 int : Int -> KnownValue Int
 int =
     primitive Types.ResponseInt
 
 
-{-| TODO
+{-| Narrow down a query by indicating that you only want data where a piece
+has a particular floating-point value.
 -}
 float : Float -> KnownValue Float
 float =
     primitive Types.ResponseFloat
 
 
-{-| TODO
+{-| Narrow down a query by indicating that you only want data where a piece
+has a particular boolean value.
 -}
 bool : Bool -> KnownValue Bool
 bool =
     primitive Types.ResponseBool
 
 
-{-| TODO
+{-| Narrow down a query by indicating that you only want data where a piece
+has a particular string value.
 -}
 string : String -> KnownValue String
 string =
     primitive Types.ResponseString
 
 
-{-| TODO
+{-| Narrow down a query by indicating that you only want data where a piece
+is a `()`. This is primarily used to query for `Maybe` values on the server
+that you want to be `Nothing`.
 -}
 unit : KnownValue ()
 unit =
     KnownValue () (Types.ResponseUnit)
 
 
-{-| TODO
+{-| Narrow down a query by indicating that you only want data where a piece
+is a particular list of values.
 -}
 list : List (KnownValue a) -> KnownValue (List a)
 list knownValues =
@@ -100,14 +131,48 @@ list knownValues =
         KnownValue (List.map value knownValues) (Types.ResponseList (List.map queryResponse knownValues))
 
 
-{-| TODO
+{-| Transform a known value. This is primarily used to "cast" primitive values into
+user-defined types.
+```
+type UniqueId = UniqueId Int
+
+knownUid : KnownValue UniqueId
+knownUid =
+    Known.map UniqueId (Known.int 3)
+```
+
+Note that this does not affect the *encoded* value, the value that would be
+sent to the server or the client over the wire. For instance,
+
+```
+myKnownInt : KnownValue Int
+myKnownInt =
+    Known.map ((+) 2) (Known.int 6)
+```
+
+will be *encoded* as 6, not 8.
 -}
 map : (a -> b) -> KnownValue a -> KnownValue b
 map f (KnownValue x queryResponse) =
     KnownValue (f x) queryResponse
 
 
-{-| TODO
+{-| Combine two known values using a function that takes two arguments. This, along with
+`andMap` are our primary tools for building bigger `KnownValue`s than just primitives.
+
+```
+type PeanutButter = Creamy | Crunchy
+type Jelly = Grape | Apple
+type PBnJ = PBnJ PeanutButter Jelly
+
+knownPBnJ : KnownValue PBnJ
+knownPBnJ =
+    Known.map2 PBnJ
+        (Known.string "Creamy"
+            |> Known.map (\_ -> Creamy))
+        (Known.string "Apple"
+            |> Known.map (\_ -> Apple))
+```
 -}
 map2 :
     (a -> b -> c)
@@ -118,7 +183,17 @@ map2 f (KnownValue value1 queryResponse1) (KnownValue value2 queryResponse2) =
     KnownValue (f value1 value2) (Types.ResponseProduct queryResponse1 queryResponse2)
 
 
-{-| TODO
+{-| Combine three known values using a function that takes three arugments.
+```
+type NonEmptyList a = NonEmptyList (List a) a (List a)
+
+knownNonEmptyIntList = Known (NonEmptyList Int)
+knownNonEmptyIntList =
+    Known.map3 NonEmptyList
+        (Known.list [])
+        (Known.int 4)
+        (Known.list [Known.int 2, Known.int -3])
+```
 -}
 map3 :
     (a -> b -> c -> d)
@@ -133,8 +208,7 @@ map3 f knownValue1 knownValue2 knownValue3 =
         |> andMap knownValue3
 
 
-{-| TODO
--}
+{-| -}
 map4 :
     (a -> b -> c -> d -> e)
     -> KnownValue a
@@ -150,8 +224,7 @@ map4 f knownValue1 knownValue2 knownValue3 knownValue4 =
         |> andMap knownValue4
 
 
-{-| TODO
--}
+{-| -}
 map5 :
     (a -> b -> c -> d -> e -> f)
     -> KnownValue a
@@ -169,8 +242,7 @@ map5 f knownValue1 knownValue2 knownValue3 knownValue4 knownValue5 =
         |> andMap knownValue5
 
 
-{-| TODO
--}
+{-| -}
 map6 :
     (a -> b -> c -> d -> e -> f -> g)
     -> KnownValue a
@@ -190,8 +262,7 @@ map6 f knownValue1 knownValue2 knownValue3 knownValue4 knownValue5 knownValue6 =
         |> andMap knownValue6
 
 
-{-| TODO
--}
+{-| -}
 map7 :
     (a -> b -> c -> d -> e -> f -> g -> h)
     -> KnownValue a
@@ -213,8 +284,7 @@ map7 f knownValue1 knownValue2 knownValue3 knownValue4 knownValue5 knownValue6 k
         |> andMap knownValue7
 
 
-{-| TODO
--}
+{-| -}
 map8 :
     (a -> b -> c -> d -> e -> f -> g -> h -> i)
     -> KnownValue a
@@ -238,14 +308,47 @@ map8 f knownValue1 knownValue2 knownValue3 knownValue4 knownValue5 knownValue6 k
         |> andMap knownValue8
 
 
-{-| TODO
+{-| Make a known value that contains a value of a particular type but won't be encoded.
+Primarily used to contain functions for `andMap`.
 -}
 succeed : a -> KnownValue a
 succeed x =
     KnownValue x Types.ResponseIgnoreThis
 
 
-{-| TODO
+{-| Create a known value that depends on another. Like `map2`, `map3`, and the other
+map functions, this can be used to build larger known values.
+
+For instance, this known value:
+```
+-- represents a column with a header,
+-- as in a spreadsheet program
+type Column a = Column String (List a)
+
+knownIntColumn : Known (Column Int)
+knownIntColumn =
+    map2 Column
+        (Known.string "Numbers")
+        (Known.list
+            [ Known.int 42
+            , Known.int 37
+            ]
+        )
+```
+
+is equivalent to this one:
+```
+knownIntColumn : Known (Column Int)
+knownIntColumn =
+    Known.succeed Column
+        |> Known.andMap (Known.string "Numbers")
+        |> Known.andMap
+            (Known.list
+                [ Known.int 42
+                , Known.int 37
+                ]
+            )
+```
 -}
 andMap : KnownValue a -> KnownValue (a -> b) -> KnownValue b
 andMap =
@@ -268,8 +371,16 @@ query (KnownValue x expectedQueryResponse) =
         }
 
 
-{-| TODO
+{-| A `KnownValue` is simply a container around a `QueryResponse`. Use this function
+to get the underlying `QueryResponse`.
 -}
 queryResponse : KnownValue a -> QueryResponse
 queryResponse (KnownValue _ response) =
     response
+
+
+{-| Get the underlying value out of a `KnownValue`.
+-}
+value : KnownValue a -> a
+value (KnownValue x _) =
+    x
