@@ -214,7 +214,7 @@ skipThen parserToSkip nextParser =
 rawStringParser : Parser s String
 rawStringParser =
     -- thanks Bogdanp
-    (Combine.string "\"" *> Combine.regex "(\\\\\"|[^\"\n])*" <* Combine.string "\"")
+    (Combine.string "\"" *> Combine.regex "(\\\\\"|\\\\\\\\|[^\"\n])*" <* Combine.string "\"")
 
 
 responseParser : Parser () QueryResponse
