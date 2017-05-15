@@ -86,7 +86,7 @@ queryResponseToString queryResponse =
             toString x
 
         ResponseFloat x ->
-            toString x
+            toString x ++ "f"
 
         ResponseBool x ->
             toString x
@@ -227,7 +227,11 @@ responseParser =
             Combine.int |> Combine.map ResponseInt
 
         floatParser =
-            Combine.float |> Combine.map ResponseFloat
+            Combine.choice
+                [ Combine.float <* Combine.string "f"
+                , Combine.int <* Combine.string "f" |> Combine.map toFloat
+                ]
+                |> Combine.map ResponseFloat
 
         boolParser =
             Combine.or

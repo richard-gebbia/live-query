@@ -28,7 +28,7 @@ primitiveTests =
         , fuzz Fuzz.float
             "float fuzz"
             (\aFloat ->
-                Query.parseModel Query.float (toString aFloat)
+                Query.parseModel Query.float (toString aFloat ++ "f")
                     |> Expect.equal (Ok aFloat)
             )
         , test "boolean true"
@@ -86,5 +86,23 @@ biggerStructureTests =
                     |> Query.queryResponseToString
                     |> Query.parseModel (Query.pair query1 query2)
                     |> Expect.equal (Ok ( prim1, prim2 ))
+            )
+        , fuzz2
+            primitiveFuzzer
+            primitiveFuzzer
+            "oneOf first fuzz"
+            (\( prim1, query1, resp1 ) ( prim2, query2, resp2 ) ->
+                Query.queryResponseToString resp1
+                    |> Query.parseModel (Query.oneOf [ query1, query2 ])
+                    |> Expect.equal (Ok prim1)
+            )
+        , fuzz2
+            primitiveFuzzer
+            primitiveFuzzer
+            "oneOf second fuzz"
+            (\( prim1, query1, resp1 ) ( prim2, query2, resp2 ) ->
+                Query.queryResponseToString resp2
+                    |> Query.parseModel (Query.oneOf [ query1, query2 ])
+                    |> Expect.equal (Ok prim2)
             )
         ]

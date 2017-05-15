@@ -376,9 +376,6 @@ float =
         , parser =
             (\queryResponse ->
                 case queryResponse of
-                    ResponseInt x ->
-                        Ok (toFloat x)
-
                     ResponseFloat x ->
                         Ok x
 
