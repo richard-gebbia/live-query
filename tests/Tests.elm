@@ -63,14 +63,78 @@ type Primitive
     | PrimitiveString String
 
 
-primitiveFuzzer : Fuzzer ( Primitive, Query Primitive, Query.QueryResponse )
+primitiveFuzzer : Fuzzer Primitive
 primitiveFuzzer =
     Fuzz.frequencyOrCrash
-        [ ( 1, Fuzz.constant ( PrimitiveUnit, Query.unit |> Query.map (\_ -> PrimitiveUnit), Query.ResponseUnit ) )
-        , ( 1, Fuzz.bool |> Fuzz.map (\b -> ( PrimitiveBool b, Query.bool |> Query.map PrimitiveBool, Query.ResponseBool b )) )
-        , ( 1, Fuzz.int |> Fuzz.map (\i -> ( PrimitiveInt i, Query.int |> Query.map PrimitiveInt, Query.ResponseInt i )) )
-        , ( 1, Fuzz.float |> Fuzz.map (\f -> ( PrimitiveFloat f, Query.float |> Query.map PrimitiveFloat, Query.ResponseFloat f )) )
-        , ( 1, Fuzz.string |> Fuzz.map (\s -> ( PrimitiveString (String.unquote (toString s)), Query.string |> Query.map PrimitiveString, Query.ResponseString s )) )
+        [ ( 1, Fuzz.constant PrimitiveUnit )
+        , ( 1, Fuzz.bool |> Fuzz.map PrimitiveBool )
+        , ( 1, Fuzz.int |> Fuzz.map PrimitiveInt )
+        , ( 1, Fuzz.float |> Fuzz.map PrimitiveFloat )
+        , ( 1, Fuzz.string |> Fuzz.map PrimitiveString )
+        ]
+
+
+queryForPrimitive : Primitive -> Query Primitive
+queryForPrimitive prim =
+    case prim of
+        PrimitiveUnit ->
+            Query.unit |> Query.map (\_ -> PrimitiveUnit)
+
+        PrimitiveBool _ ->
+            Query.bool |> Query.map PrimitiveBool
+
+        PrimitiveInt _ ->
+            Query.int |> Query.map PrimitiveInt
+
+        PrimitiveFloat _ ->
+            Query.float |> Query.map PrimitiveFloat
+
+        PrimitiveString _ ->
+            Query.string |> Query.map PrimitiveString
+
+
+queryResponseForPrimitive : Primitive -> Query.QueryResponse
+queryResponseForPrimitive prim =
+    case prim of
+        PrimitiveUnit ->
+            Query.ResponseUnit
+
+        PrimitiveBool b ->
+            Query.ResponseBool b
+
+        PrimitiveInt i ->
+            Query.ResponseInt i
+
+        PrimitiveFloat f ->
+            Query.ResponseFloat f
+
+        PrimitiveString s ->
+            Query.ResponseString s
+
+
+unquoteIfPrimitiveString : Primitive -> Primitive
+unquoteIfPrimitiveString prim =
+    case prim of
+        PrimitiveString s ->
+            toString s |> String.unquote |> PrimitiveString
+
+        _ ->
+            prim
+
+
+primitiveQueryAndResponse : Primitive -> ( Primitive, Query Primitive, Query.QueryResponse )
+primitiveQueryAndResponse prim =
+    ( unquoteIfPrimitiveString prim, queryForPrimitive prim, queryResponseForPrimitive prim )
+
+
+queryGenericPrimitive : Query Primitive
+queryGenericPrimitive =
+    Query.oneOf
+        [ queryForPrimitive PrimitiveUnit
+        , queryForPrimitive (PrimitiveBool False)
+        , queryForPrimitive (PrimitiveInt 0)
+        , queryForPrimitive (PrimitiveFloat 0)
+        , queryForPrimitive (PrimitiveString "")
         ]
 
 
@@ -78,8 +142,8 @@ biggerStructureTests : Test
 biggerStructureTests =
     describe "Test bigger query structures"
         [ fuzz2
-            primitiveFuzzer
-            primitiveFuzzer
+            (Fuzz.map primitiveQueryAndResponse primitiveFuzzer)
+            (Fuzz.map primitiveQueryAndResponse primitiveFuzzer)
             "pair fuzz"
             (\( prim1, query1, resp1 ) ( prim2, query2, resp2 ) ->
                 Query.ResponseProduct resp1 resp2
@@ -88,8 +152,8 @@ biggerStructureTests =
                     |> Expect.equal (Ok ( prim1, prim2 ))
             )
         , fuzz2
-            primitiveFuzzer
-            primitiveFuzzer
+            (Fuzz.map primitiveQueryAndResponse primitiveFuzzer)
+            (Fuzz.map primitiveQueryAndResponse primitiveFuzzer)
             "oneOf first fuzz"
             (\( prim1, query1, resp1 ) ( prim2, query2, resp2 ) ->
                 Query.queryResponseToString resp1
@@ -97,12 +161,40 @@ biggerStructureTests =
                     |> Expect.equal (Ok prim1)
             )
         , fuzz2
-            primitiveFuzzer
-            primitiveFuzzer
+            (Fuzz.map primitiveQueryAndResponse primitiveFuzzer)
+            (Fuzz.map primitiveQueryAndResponse primitiveFuzzer)
             "oneOf second fuzz"
             (\( prim1, query1, resp1 ) ( prim2, query2, resp2 ) ->
                 Query.queryResponseToString resp2
                     |> Query.parseModel (Query.oneOf [ query1, query2 ])
                     |> Expect.equal (Ok prim2)
+            )
+        , fuzz (Fuzz.list primitiveFuzzer)
+            "primitive list fuzz"
+            (\aList ->
+                List.map queryResponseForPrimitive aList
+                    |> Query.ResponseList
+                    |> Query.queryResponseToString
+                    |> Query.parseModel (Query.list queryGenericPrimitive)
+                    |> Expect.equal (Ok (List.map unquoteIfPrimitiveString aList))
+            )
+        , fuzz2
+            (Fuzz.list primitiveFuzzer)
+            (Fuzz.list primitiveFuzzer)
+            "pair list fuzz"
+            (\aList bList ->
+                List.map2 Query.ResponseProduct
+                    (List.map queryResponseForPrimitive aList)
+                    (List.map queryResponseForPrimitive bList)
+                    |> Query.ResponseList
+                    |> Query.queryResponseToString
+                    |> Query.parseModel (Query.list (Query.pair queryGenericPrimitive queryGenericPrimitive))
+                    |> Expect.equal
+                        (Ok
+                            (List.map2 (,)
+                                (List.map unquoteIfPrimitiveString aList)
+                                (List.map unquoteIfPrimitiveString bList)
+                            )
+                        )
             )
         ]

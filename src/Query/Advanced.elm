@@ -100,7 +100,8 @@ queryResponseToString queryResponse =
         ResponseList list ->
             List.map queryResponseToString list
                 |> List.intersperse ","
-                |> List.foldl (++) ""
+                |> List.foldr (++) ""
+                |> (\s -> "[" ++ s ++ "]")
 
         ResponseDict entries ->
             let
