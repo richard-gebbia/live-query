@@ -14,6 +14,7 @@ module Query
         , oneOf
         , maybe
         , list
+        , dict
         , RecordQuery
         , record
         , field
@@ -52,7 +53,7 @@ write a bunch of code to send requests to the server or parse its responses.
 @docs KnownValue, known
 
 # Bigger Structures
-@docs pair, oneOf, maybe, list
+@docs pair, oneOf, maybe, list, dict
 
 # Mapping
 @docs map, map2, map3, map4, map5, map6, map7, map8

@@ -6,6 +6,7 @@ import Fuzz exposing (Fuzzer)
 import Query exposing (Query)
 import Query.Advanced as Query
 import String.Extra as String
+import Dict exposing (Dict)
 
 
 all : Test
@@ -138,6 +139,44 @@ queryGenericPrimitive =
         ]
 
 
+dictTest :
+    String
+    -> Fuzzer comparable
+    -> (comparable -> comparable)
+    -> (comparable -> Query.QueryResponse)
+    -> Query comparable
+    -> Test
+dictTest description keyFuzzer keyTransform toResponse keyQuery =
+    fuzz (Fuzz.list (Fuzz.tuple ( keyFuzzer, primitiveFuzzer )))
+        description
+        (\aList ->
+            let
+                asDict =
+                    Dict.fromList aList
+
+                uniquifiedByKey =
+                    Dict.toList asDict
+
+                expected =
+                    List.map
+                        (\( key, value ) ->
+                            ( keyTransform key, unquoteIfPrimitiveString value )
+                        )
+                        uniquifiedByKey
+                        |> Dict.fromList
+            in
+                uniquifiedByKey
+                    |> List.map
+                        (\( key, value ) ->
+                            ( toResponse key, queryResponseForPrimitive value )
+                        )
+                    |> Query.ResponseDict
+                    |> Query.queryResponseToString
+                    |> Query.parseModel (Query.dict keyQuery queryGenericPrimitive)
+                    |> Expect.equal (Ok expected)
+        )
+
+
 biggerStructureTests : Test
 biggerStructureTests =
     describe "Test bigger query structures"
@@ -190,11 +229,25 @@ biggerStructureTests =
                     |> Query.queryResponseToString
                     |> Query.parseModel (Query.list (Query.pair queryGenericPrimitive queryGenericPrimitive))
                     |> Expect.equal
-                        (Ok
-                            (List.map2 (,)
+                        (Ok <|
+                            List.map2 (,)
                                 (List.map unquoteIfPrimitiveString aList)
                                 (List.map unquoteIfPrimitiveString bList)
-                            )
                         )
             )
+        , dictTest "string dict fuzz"
+            Fuzz.string
+            (toString >> String.unquote)
+            Query.ResponseString
+            Query.string
+        , dictTest "int dict fuzz"
+            Fuzz.int
+            identity
+            Query.ResponseInt
+            Query.int
+        , dictTest "float dict fuzz"
+            Fuzz.float
+            identity
+            Query.ResponseFloat
+            Query.float
         ]
