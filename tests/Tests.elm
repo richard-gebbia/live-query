@@ -177,6 +177,11 @@ dictTest description keyFuzzer keyTransform toResponse keyQuery =
         )
 
 
+mapPair : ( a1 -> a2, b1 -> b2 ) -> ( a1, b1 ) -> ( a2, b2 )
+mapPair ( f, g ) ( x, y ) =
+    ( f x, g y )
+
+
 biggerStructureTests : Test
 biggerStructureTests =
     describe "Test bigger query structures"
@@ -250,4 +255,50 @@ biggerStructureTests =
             identity
             Query.ResponseFloat
             Query.float
+          -- I'm sorry
+        , dictTest "(string, string) dict fuzz"
+            (Fuzz.tuple ( Fuzz.string, Fuzz.string ))
+            (mapPair (( toString >> String.unquote, toString >> String.unquote )))
+            (\( x, y ) -> Query.ResponseProduct (Query.ResponseString x) (Query.ResponseString y))
+            (Query.pair Query.string Query.string)
+        , dictTest "(string, int) dict fuzz"
+            (Fuzz.tuple ( Fuzz.string, Fuzz.int ))
+            (mapPair (( toString >> String.unquote, identity )))
+            (\( x, y ) -> Query.ResponseProduct (Query.ResponseString x) (Query.ResponseInt y))
+            (Query.pair Query.string Query.int)
+        , dictTest "(string, float) dict fuzz"
+            (Fuzz.tuple ( Fuzz.string, Fuzz.float ))
+            (mapPair (( toString >> String.unquote, identity )))
+            (\( x, y ) -> Query.ResponseProduct (Query.ResponseString x) (Query.ResponseFloat y))
+            (Query.pair Query.string Query.float)
+        , dictTest "(int, string) dict fuzz"
+            (Fuzz.tuple ( Fuzz.int, Fuzz.string ))
+            (mapPair (( identity, toString >> String.unquote )))
+            (\( x, y ) -> Query.ResponseProduct (Query.ResponseInt x) (Query.ResponseString y))
+            (Query.pair Query.int Query.string)
+        , dictTest "(int, int) dict fuzz"
+            (Fuzz.tuple ( Fuzz.int, Fuzz.int ))
+            identity
+            (\( x, y ) -> Query.ResponseProduct (Query.ResponseInt x) (Query.ResponseInt y))
+            (Query.pair Query.int Query.int)
+        , dictTest "(int, float) dict fuzz"
+            (Fuzz.tuple ( Fuzz.int, Fuzz.float ))
+            identity
+            (\( x, y ) -> Query.ResponseProduct (Query.ResponseInt x) (Query.ResponseFloat y))
+            (Query.pair Query.int Query.float)
+        , dictTest "(float, string) dict fuzz"
+            (Fuzz.tuple ( Fuzz.float, Fuzz.string ))
+            (mapPair (( identity, toString >> String.unquote )))
+            (\( x, y ) -> Query.ResponseProduct (Query.ResponseFloat x) (Query.ResponseString y))
+            (Query.pair Query.float Query.string)
+        , dictTest "(float, int) dict fuzz"
+            (Fuzz.tuple ( Fuzz.float, Fuzz.int ))
+            identity
+            (\( x, y ) -> Query.ResponseProduct (Query.ResponseFloat x) (Query.ResponseInt y))
+            (Query.pair Query.float Query.int)
+        , dictTest "(float, float) dict fuzz"
+            (Fuzz.tuple ( Fuzz.float, Fuzz.float ))
+            identity
+            (\( x, y ) -> Query.ResponseProduct (Query.ResponseFloat x) (Query.ResponseFloat y))
+            (Query.pair Query.float Query.float)
         ]
